@@ -73,6 +73,7 @@
 (defvar vterm-environment)
 (defvar eat-term-name)
 (defvar vterm--process)
+(defvar vterm-copy-mode)
 
 ;; External function declarations for vterm
 (declare-function vterm "vterm" (&optional arg))
@@ -80,6 +81,9 @@
 (declare-function vterm-send-escape "vterm" ())
 (declare-function vterm-send-return "vterm" ())
 (declare-function vterm--window-adjust-process-window-size "vterm" (&optional frame))
+(declare-function vterm-copy-mode "vterm" (&optional arg))
+(declare-function vterm-copy-mode-done "vterm" (arg))
+(declare-function vterm-reset-cursor-point "vterm" ())
 
 ;; External function declarations for eat
 (declare-function eat-mode "eat" ())
@@ -87,6 +91,9 @@
 (declare-function eat-term-send-string "eat" (terminal string))
 (declare-function eat-term-display-cursor "eat" (terminal))
 (declare-function eat--adjust-process-window-size "eat" (process windows))
+(declare-function eat-emacs-mode "eat" ())
+(declare-function eat-term-display-cursor "eat" (terminal))
+(declare-function eat-semi-char-mode "eat")
 
 ;;; Customization
 
@@ -447,14 +454,31 @@ This function binds:
 - C-<escape> to send escape"
   (cond
    ((eq claude-code-ide-terminal-backend 'vterm)
-    ;; For vterm, we set up local keybindings in vterm-mode-map
-    (local-set-key (kbd "S-<return>") #'claude-code-ide-insert-newline)
-    (local-set-key (kbd "C-<escape>") #'claude-code-ide-send-escape))
+    ;; For vterm, we use minor-mode-overriding-map-alist to override specific keys
+    (let ((override-map (make-sparse-keymap))
+          (copy-mode-map (make-sparse-keymap)))
+      ;; Regular mode bindings
+      (define-key override-map (kbd "S-<return>") #'claude-code-ide-insert-newline)
+      (define-key override-map (kbd "C-<escape>") #'claude-code-ide-send-escape)
+      (define-key override-map (kbd "C-c C-t") #'claude-code-ide-vterm-copy-mode)
+      ;; Copy mode bindings (when vterm-copy-mode is active)
+      (define-key copy-mode-map (kbd "<return>") #'claude-code-ide-vterm-exit-copy-mode)
+      (define-key copy-mode-map (kbd "RET") #'claude-code-ide-vterm-exit-copy-mode)
+      ;; Set up conditional keymap based on copy mode state
+      (setq-local minor-mode-overriding-map-alist
+                  `((vterm-copy-mode . ,copy-mode-map)
+                    (t . ,override-map)))))
    ((eq claude-code-ide-terminal-backend 'eat)
-    ;; For eat, we need to modify the semi-char mode map which is the default
-    ;; We use local-set-key to make it buffer-local
-    (local-set-key (kbd "S-<return>") #'claude-code-ide-insert-newline)
-    (local-set-key (kbd "C-<escape>") #'claude-code-ide-send-escape))
+    ;; For eat, we use minor-mode-overriding-map-alist to override specific keys
+    ;; without blocking all other input like overriding-local-map would
+    (let ((override-map (make-sparse-keymap)))
+      (define-key override-map (kbd "S-<return>") #'claude-code-ide-insert-newline)
+      (define-key override-map (kbd "C-<escape>") #'claude-code-ide-send-escape)
+      (define-key override-map (kbd "C-c C-e") #'claude-code-ide-eat-emacs-mode-sync)
+      (define-key override-map (kbd "C-c C-j") #'claude-code-ide-eat-semi-char-mode-sync)
+      ;; Use minor-mode-overriding-map-alist for high precedence without blocking all input
+      (setq-local minor-mode-overriding-map-alist
+                  (list (cons t override-map)))))
    (t
     (error "Unknown terminal backend: %s" claude-code-ide-terminal-backend))))
 
